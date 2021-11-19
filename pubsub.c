@@ -18,6 +18,7 @@
 
 #define MY_DEVICE "pubsub"
 #define MAX_CHARACTERS 1000
+#define MAX_PROCESSES 512
 
 MODULE_AUTHOR("Anonymous");
 MODULE_LICENSE("GPL");
@@ -29,14 +30,17 @@ int buffer_counter = 0;
 typedef struct myDevice{
     char *data;
     int minor;
-    int users_count;
     int write_p;
-    int read_p;
+    int users_count;
+    Process** pid_array;
+    int reach_EOF_count;
     myDevice *next;
 }myDevice;
 
 typedef struct Process{
     myDevice *device;
+    int pid;
+    int read_p;
     int permission;
 }Process;
 
@@ -50,6 +54,27 @@ struct file_operations my_fops = {
     .ioctl = my_ioctl,
 };
 
+int find_available_id(Process** pid_array){
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
+        if(pid_array[i] != NULL) return i;
+    }
+    //not supposed to reach here
+    return 0;
+}
+
+void init_array(Process** pid_array){
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
+        pid_array[i] = NULL;
+    }
+}
+
+void init_all_read_p(Process **pid_array){
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
+        if(pid_array[i] != NULL){
+            pid_array[i]->read_p = 0;
+        }
+    }
+}
 int init_module(void)
 {
     // This function is called when inserting the module using insmod
@@ -105,16 +130,22 @@ int my_open(struct inode *inode, struct file *filp)
     while(curr_device){
         if(curr_device->minor == curr_minor){
             printk("Device is found! Device's minor : %d\n", curr_minor);
-            curr_device->users_count++;
 
             new_process->device = curr_device;
+            new_process->pid = find_available_id(curr_device->pid_array);
+            new_process->read_p = 0;
             new_process->permission = TYPE_NONE;
             filp->private_data = new_process;
+
+            curr_device->users_count++;
+            curr_device->pid_array[new_process->pid] = new_process;
+
             return 0;
         }
         curr_device = curr_device->next;
     }
 
+    //if reached here the buffer is not exist
     printk("Device was not found! Setting new device... Device's minor : %d\n", curr_minor);
 
     curr_device = kmalloc(sizeof(myDevice),GFP_KERNEL);
@@ -123,7 +154,7 @@ int my_open(struct inode *inode, struct file *filp)
         printk("device cannot be opened! kmalloc was failed\n");
         return -ENOMEM;
     }
-    curr_device->data = kmalloc(sizeof(char)*(MAX_CHARACTERS));
+    curr_device->data = kmalloc(sizeof(char)*(MAX_CHARACTERS),GFP_KERNEL);
     //checking if allocating succeed
     if(!curr_device->data){
         printk("device cannot be opened! kmalloc was failed\n");
@@ -131,12 +162,24 @@ int my_open(struct inode *inode, struct file *filp)
         return -ENOMEM;
     }
     curr_device->minor = curr_minor;
-    curr_device->user_count = 1;
     curr_device->write_p = 0;
-    curr_device->read_p = 0;
+    curr_device->users_count = 1;
+    
+    curr_device->pid_array = kmalloc(sizeof(*Process)*MAX_PROCESSES,GFP_KERNEL);
+    if(!curr_device->pid_array){
+            printk("device cannot be opened! kmalloc was failed\n");
+            kfree(curr_device->data);
+            kfree(curr_device);
+            return -ENOMEM;
+    }
+    init_array(curr_device->pid_array);
+    curr_device->pid_array[0] = new_process;
+
+    curr_device->reach_EOF_count = 0;
     curr_device->next = NULL;
 
     new_process->device = curr_device;
+    new_process->read_p = 0;
     new_process->permission = TYPE_NONE;
 
     filp->private_data = new_process;
@@ -159,7 +202,7 @@ int my_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
-ssize_t my_write(struct file *filp, char *buf, size_t count){
+ssize_t my_write(struct file *filp, char *buf, size_t count, loff_t *f_pos){
 
     printk("my_write is called!\n");
 
@@ -173,11 +216,11 @@ ssize_t my_write(struct file *filp, char *buf, size_t count){
         return -EINVAL;
     }
 
-    Process *process = filp->private_data;
-    myDevice *curr_device = process->device;
+    Process *curr_process = filp->private_data;
+    myDevice *curr_device = curr_process->device;
     int written_bytes = 0;
 
-    if(process->permission != TYPE_PUB){
+    if(curr_process->permission != TYPE_PUB){
         printk("Wrong type!\n");
         return -EACCES;
     }
@@ -188,6 +231,7 @@ ssize_t my_write(struct file *filp, char *buf, size_t count){
     }
 
     for (int i = 0; i < count; ++i) {
+        //not sure if the check is necessary
         if(&buf[i] == NULL){
             printk("Buffer reading error! Check your input!\n");
             return -EBADF;
@@ -197,27 +241,74 @@ ssize_t my_write(struct file *filp, char *buf, size_t count){
         written_bytes++;
     }
 
-    return written_bytes; //handle valid return
+    return written_bytes;
 }
 
 ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 {
     //
     // Do read operation.
+    printk("my_read is called!\n");
+
+    if(buf == NULL){
+        printk("Invalid buffer! Check your input!\n");
+        return -EFAULT;
+    }
+
+    //there are more valid input checks?
+
+    Process *curr_process = filp->private_data;
+    myDevice *curr_device = curr_process->device;
+
+    // No data to read
+    if(curr_process->read_p == curr_device->write_p){
+        printk("No data to read!");
+        return -EAGAIN;
+    }
+
+    int read_bytes = 0;
+
+    for (int i = 0; i < count && curr_process->read_p < curr_device->write_p; ++i) {
+        buf[i] = curr_device[curr_process->read_p];
+        curr_process->read_p++;
+        read_bytes++;
+    }
+
+    if(curr_process->read_p == MAX_CHARACTERS){
+        curr_device->reach_EOF_count++;
+    }
+    
+    
+    // If all processes reached EOF, we will reset the buffer
+    if(curr_device->reach_EOF_count == curr_device->users_count){
+        curr_device->write_p = 0;
+        init_all_read_p(curr_device->pid_array);
+        curr_device->reach_EOF_count = 0;
+    }
+    
     // Return number of bytes read.
-    return 0;
+    return read_bytes;
 }
 
 
 
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
+
+    Process *curr_process = filp->private_data;
+
     switch(cmd)
     {
     case SET_TYPE:
-	//
-	// handle 
-	//
+        if(curr_process->permission != TYPE_NONE){
+            printk("Error! Type is already set!\n");
+            return -EPERM;
+        }
+
+        else{
+            curr_process->permission = arg;
+        }
+
 	break;
     case GET_TYPE:
 	//
