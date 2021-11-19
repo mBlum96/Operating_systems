@@ -25,7 +25,7 @@ MODULE_LICENSE("GPL");
 
 /* globals */
 int my_major = 0; /* will hold the major # of my device driver */
-int buffer_counter = 0;
+int buffers_counter = 0;
 
 typedef struct myDevice{
     char *data;
@@ -35,6 +35,7 @@ typedef struct myDevice{
     Process** pid_array;
     int reach_EOF_count;
     myDevice *next;
+    myDevice *prev;
 }myDevice;
 
 typedef struct Process{
@@ -164,7 +165,7 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device->minor = curr_minor;
     curr_device->write_p = 0;
     curr_device->users_count = 1;
-    
+
     curr_device->pid_array = kmalloc(sizeof(*Process)*MAX_PROCESSES,GFP_KERNEL);
     if(!curr_device->pid_array){
             printk("device cannot be opened! kmalloc was failed\n");
@@ -177,6 +178,7 @@ int my_open(struct inode *inode, struct file *filp)
 
     curr_device->reach_EOF_count = 0;
     curr_device->next = NULL;
+    curr_device->prev = NULL;
 
     new_process->device = curr_device;
     new_process->read_p = 0;
@@ -184,20 +186,56 @@ int my_open(struct inode *inode, struct file *filp)
 
     filp->private_data = new_process;
 
-    if(head_device == NULL) head_device = curr_device;
-    else if(tail_device == NULL) tail_device = curr_device;
+    if(head_device == NULL){
+        head_device = curr_device;
+    }
+    else if(tail_device == NULL){
+        head_device->next = curr_device;
+        curr_device->prev = head_device;
+        tail_device = curr_device;
+    }
     else{
         tail_device->next = curr_device;
         tail_device = curr_device;
     }
-    buffer_counter++;
+    buffers_counter++;
     return 0;
 }
 
 
-int my_release(struct inode *inode, struct file *filp)
-{
+int my_release(struct inode *inode, struct file *filp) {
     // handle file closing
+    Process *curr_process = filp->private_data;
+
+    curr_process->device->pid_array[curr_process->pid] = NULL;
+    curr_process->device->users_count--;
+
+
+
+    // last process is closed, we need to remove this buffer
+    if (curr_process->device->users_count == 0) {
+        kfree(curr_process->device->data);
+        kfree(curr_process->device->pid_array);
+
+        buffers_counter--;
+        // last buffer is closed
+        if(buffers_counter == 0){
+            kfree(curr_process->device);
+            cleanup_module();
+        }
+        // remove buffer from global buffer list
+        else {
+            if (curr_process->device == head_device) {
+                head_device = head_device->next;
+            } else if (curr_process->device == tail_device) {
+                tail_device = tail_device->prev;
+            } else {
+                curr_process->device->prev->next = curr_process->device->next;
+            }
+            kfree(curr_process->device);
+        }
+    }
+    kfree(curr_process);
 
     return 0;
 }
@@ -260,6 +298,12 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     Process *curr_process = filp->private_data;
     myDevice *curr_device = curr_process->device;
 
+    // Wrong type
+    if(curr_process->permission != TYPE_SUB){
+        printk("Wrong type!\n");
+        return -EACCES;
+    }
+
     // No data to read
     if(curr_process->read_p == curr_device->write_p){
         printk("No data to read!");
@@ -277,8 +321,8 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     if(curr_process->read_p == MAX_CHARACTERS){
         curr_device->reach_EOF_count++;
     }
-    
-    
+
+
     // If all processes reached EOF, we will reset the buffer
     if(curr_device->reach_EOF_count == curr_device->users_count){
         curr_device->write_p = 0;
@@ -311,9 +355,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
 	break;
     case GET_TYPE:
-	//
-	// handle 
-	//
+        return curr_process->permission;
 	break;
     default:
 	return -ENOTTY;
