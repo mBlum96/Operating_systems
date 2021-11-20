@@ -170,7 +170,7 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device->write_p = 0;
     curr_device->users_count = 1;
 
-    curr_device->pid_array = kmalloc(sizeof(*Process)*MAX_PROCESSES,GFP_KERNEL);
+    curr_device->pid_array = kmalloc(sizeof(Process*)*MAX_PROCESSES,GFP_KERNEL);
     if(!curr_device->pid_array){
             printk("device cannot be opened! kmalloc was failed\n");
             kfree(curr_device->data);
@@ -271,8 +271,9 @@ ssize_t my_write(struct file *filp, char *buf, size_t count, loff_t *f_pos){
         printk("There is not enough space! Check your input!\n");
         return -EAGAIN;
     }
-
-    for (int i = 0; i < count; ++i) {
+	
+	int i = 0;
+    for (; i < count; ++i) {
         //not sure if the check is necessary
         if(&buf[i] == NULL){
             printk("Buffer reading error! Check your input!\n");
@@ -315,9 +316,10 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     }
 
     int read_bytes = 0;
-
-    for (int i = 0; i < count && curr_process->read_p < curr_device->write_p; ++i) {
-        buf[i] = curr_device[curr_process->read_p];
+	
+	int i = 0;
+    for (; i < count && curr_process->read_p < curr_device->write_p; ++i) {
+        buf[i] = (curr_device->data)[curr_process->read_p];
         curr_process->read_p++;
         read_bytes++;
     }
@@ -337,6 +339,7 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // Return number of bytes read.
     return read_bytes;
 }
+
 
 
 
