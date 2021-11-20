@@ -339,20 +339,18 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
 
-    Process *curr_process = filp->private_data;
-
     switch(cmd)
     {
     case SET_TYPE:
-        if(curr_process->permission != TYPE_NONE){
+        if(filp->private_data->permission != TYPE_NONE){
             printk("Error! Type is already set!\n");
             return -EPERM;
         }
 
         else{
-            if(arg == TYPE_PUB||arg == TYPE_SUB){
+            if(cmd == TYPE_PUB||cmd == TYPE_SUB){
                 printk("Changed permission type");
-                curr_process->permission=cmd;
+                filp->private_data->permission=cmd;
             }
             else{
                 return -EINVAL;
@@ -361,7 +359,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
 	break;
     case GET_TYPE:
-        return curr_process->permission;
+        return filp->private_data->permission;
 	break;
     default:
 	return -ENOTTY;
