@@ -27,16 +27,15 @@ MODULE_LICENSE("GPL");
 int my_major = 0; /* will hold the major # of my device driver */
 int buffers_counter = 0;
 
-typedef struct Process;
 typedef struct myDevice{
     char *data;
     int minor;
     int write_p;
     int users_count;
-    Process** pid_array;
+    struct Process** pid_array;
     int reach_EOF_count;
-    myDevice *next;
-    myDevice *prev;
+    struct myDevice *next;
+    struct myDevice *prev;
 }myDevice;
 
 typedef struct Process{
@@ -57,7 +56,8 @@ struct file_operations my_fops = {
 };
 
 int find_available_id(Process** pid_array){
-    for (int i = 0; i < MAX_PROCESSES; ++i) {
+	int i=0;
+    for (; i < MAX_PROCESSES; ++i) {
         if(pid_array[i] != NULL) return i;
     }
     //not supposed to reach here
@@ -65,13 +65,15 @@ int find_available_id(Process** pid_array){
 }
 
 void init_array(Process** pid_array){
-    for (int i = 0; i < MAX_PROCESSES; ++i) {
+	int i=0;
+    for (; i < MAX_PROCESSES; ++i) {
         pid_array[i] = NULL;
     }
 }
 
 void init_all_read_p(Process **pid_array){
-    for (int i = 0; i < MAX_PROCESSES; ++i) {
+	int i=0;
+    for (; i < MAX_PROCESSES; ++i) {
         if(pid_array[i] != NULL){
             pid_array[i]->read_p = 0;
         }
