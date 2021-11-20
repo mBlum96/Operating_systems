@@ -350,7 +350,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
         }
 
         else{
-            if(cmd == TYPE_PUB||cmd == TYPE_SUB){
+            if(arg == TYPE_PUB||arg == TYPE_SUB){
                 printk("Changed permission type");
                 curr_process->permission=cmd;
             }
