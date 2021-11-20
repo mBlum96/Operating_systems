@@ -27,6 +27,7 @@ MODULE_LICENSE("GPL");
 int my_major = 0; /* will hold the major # of my device driver */
 int buffers_counter = 0;
 
+typedef struct Process;
 typedef struct myDevice{
     char *data;
     int minor;
@@ -359,7 +360,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
 	break;
     case GET_TYPE:
-        return filp->private_data->permission;
+	return (Process*)(filp->private_data)->permission;
 	break;
     default:
 	return -ENOTTY;
