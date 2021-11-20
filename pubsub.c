@@ -13,6 +13,7 @@
 #include <linux/errno.h>  
 #include <asm/segment.h>
 #include <asm/current.h>
+#include <linux/slab.h>
 
 #include "pubsub.h"
 
