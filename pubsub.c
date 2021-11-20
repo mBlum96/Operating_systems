@@ -209,6 +209,7 @@ int my_open(struct inode *inode, struct file *filp)
 
 int my_release(struct inode *inode, struct file *filp) {
     // handle file closing
+	printk("my_release is called!\n");
     Process *curr_process = filp->private_data;
 
     curr_process->device->pid_array[curr_process->pid] = NULL;
@@ -345,6 +346,7 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
+	printk("my_ioctl is called!\n");
 	Process* curr_process = (Process*)(filp->private_data);
 
     switch(cmd)
@@ -356,18 +358,13 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
         }
 
         else{
-            if(cmd == TYPE_PUB||cmd == TYPE_SUB){
-                printk("Changed permission type");
-                curr_process->permission=cmd;
-            }
-            else{
-                return -EINVAL;
-            }
+			printk("Type is set!\n");
+			curr_process->permission = arg;
         }
 
 	break;
     case GET_TYPE:
-	return curr_process->permission;
+		return curr_process->permission;
 	break;
     default:
 	return -ENOTTY;
