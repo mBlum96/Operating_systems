@@ -6,14 +6,13 @@
 #define LINUX
 #define __KERNEL__
 
-#include <linux/kernel.h>  	
+#include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/fs.h>       		
+#include <linux/fs.h>
 #include <asm/uaccess.h>
-#include <linux/errno.h>  
+#include <linux/errno.h>
 #include <asm/segment.h>
 #include <asm/current.h>
-#include <linux/slab.h>
 
 #include "pubsub.h"
 
@@ -28,15 +27,17 @@ MODULE_LICENSE("GPL");
 int my_major = 0; /* will hold the major # of my device driver */
 int buffers_counter = 0;
 
+struct Process;
+
 typedef struct myDevice{
     char *data;
     int minor;
     int write_p;
     int users_count;
-    struct Process** pid_array;
+    Process **pid_array;
     int reach_EOF_count;
-    struct myDevice *next;
-    struct myDevice *prev;
+    myDevice *next;
+    myDevice *prev;
 }myDevice;
 
 typedef struct Process{
@@ -57,8 +58,7 @@ struct file_operations my_fops = {
 };
 
 int find_available_id(Process** pid_array){
-	int i=0;
-    for (; i < MAX_PROCESSES; ++i) {
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
         if(pid_array[i] != NULL) return i;
     }
     //not supposed to reach here
@@ -66,15 +66,13 @@ int find_available_id(Process** pid_array){
 }
 
 void init_array(Process** pid_array){
-	int i=0;
-    for (; i < MAX_PROCESSES; ++i) {
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
         pid_array[i] = NULL;
     }
 }
 
 void init_all_read_p(Process **pid_array){
-	int i=0;
-    for (; i < MAX_PROCESSES; ++i) {
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
         if(pid_array[i] != NULL){
             pid_array[i]->read_p = 0;
         }
@@ -170,7 +168,7 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device->write_p = 0;
     curr_device->users_count = 1;
 
-    curr_device->pid_array = kmalloc(sizeof(Process*)*MAX_PROCESSES,GFP_KERNEL);
+    curr_device->pid_array = kmalloc(sizeof(*Process)*MAX_PROCESSES,GFP_KERNEL);
     if(!curr_device->pid_array){
             printk("device cannot be opened! kmalloc was failed\n");
             kfree(curr_device->data);
@@ -209,7 +207,6 @@ int my_open(struct inode *inode, struct file *filp)
 
 int my_release(struct inode *inode, struct file *filp) {
     // handle file closing
-	printk("my_release is called!\n");
     Process *curr_process = filp->private_data;
 
     curr_process->device->pid_array[curr_process->pid] = NULL;
@@ -272,9 +269,8 @@ ssize_t my_write(struct file *filp, char *buf, size_t count, loff_t *f_pos){
         printk("There is not enough space! Check your input!\n");
         return -EAGAIN;
     }
-	
-	int i = 0;
-    for (; i < count; ++i) {
+
+    for (int i = 0; i < count; ++i) {
         //not sure if the check is necessary
         if(&buf[i] == NULL){
             printk("Buffer reading error! Check your input!\n");
@@ -317,10 +313,9 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     }
 
     int read_bytes = 0;
-	
-	int i = 0;
-    for (; i < count && curr_process->read_p < curr_device->write_p; ++i) {
-        buf[i] = (curr_device->data)[curr_process->read_p];
+
+    for (int i = 0; i < count && curr_process->read_p < curr_device->write_p; ++i) {
+        buf[i] = curr_device[curr_process->read_p];
         curr_process->read_p++;
         read_bytes++;
     }
@@ -336,18 +331,16 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         init_all_read_p(curr_device->pid_array);
         curr_device->reach_EOF_count = 0;
     }
-    
+
     // Return number of bytes read.
     return read_bytes;
 }
 
 
 
-
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	printk("my_ioctl is called!\n");
-	Process* curr_process = (Process*)(filp->private_data);
+    Process *curr_process = filp->private_data;
 
     switch(cmd)
     {
@@ -358,13 +351,12 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
         }
 
         else{
-			printk("Type is set!\n");
-			curr_process->permission = arg;
+            curr_process->permission = arg;
         }
 
 	break;
     case GET_TYPE:
-		return curr_process->permission;
+        return curr_process->permission;
 	break;
     default:
 	return -ENOTTY;
