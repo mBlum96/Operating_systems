@@ -6,13 +6,14 @@
 #define LINUX
 #define __KERNEL__
 
-#include <linux/kernel.h>
+#include <linux/kernel.h>  	
 #include <linux/module.h>
-#include <linux/fs.h>
+#include <linux/fs.h>       		
 #include <asm/uaccess.h>
-#include <linux/errno.h>
+#include <linux/errno.h>  
 #include <asm/segment.h>
 #include <asm/current.h>
+#include <linux/slab.h>
 
 #include "pubsub.h"
 
@@ -27,17 +28,15 @@ MODULE_LICENSE("GPL");
 int my_major = 0; /* will hold the major # of my device driver */
 int buffers_counter = 0;
 
-struct Process;
-
 typedef struct myDevice{
     char *data;
     int minor;
     int write_p;
     int users_count;
-    Process **pid_array;
+    struct Process** pid_array;
     int reach_EOF_count;
-    myDevice *next;
-    myDevice *prev;
+    struct myDevice *next;
+    struct myDevice *prev;
 }myDevice;
 
 typedef struct Process{
@@ -53,12 +52,14 @@ myDevice *tail_device;
 struct file_operations my_fops = {
     .open = my_open,
     .release = my_release,
+	.write = my_write,
     .read = my_read,
     .ioctl = my_ioctl,
 };
 
 int find_available_id(Process** pid_array){
-    for (int i = 0; i < MAX_PROCESSES; ++i) {
+	int i=0;
+    for (; i < MAX_PROCESSES; ++i) {
         if(pid_array[i] != NULL) return i;
     }
     //not supposed to reach here
@@ -66,13 +67,15 @@ int find_available_id(Process** pid_array){
 }
 
 void init_array(Process** pid_array){
-    for (int i = 0; i < MAX_PROCESSES; ++i) {
+	int i=0;
+    for (; i < MAX_PROCESSES; ++i) {
         pid_array[i] = NULL;
     }
 }
 
 void init_all_read_p(Process **pid_array){
-    for (int i = 0; i < MAX_PROCESSES; ++i) {
+	int i=0;
+    for (; i < MAX_PROCESSES; ++i) {
         if(pid_array[i] != NULL){
             pid_array[i]->read_p = 0;
         }
@@ -168,7 +171,7 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device->write_p = 0;
     curr_device->users_count = 1;
 
-    curr_device->pid_array = kmalloc(sizeof(*Process)*MAX_PROCESSES,GFP_KERNEL);
+    curr_device->pid_array = kmalloc(sizeof(Process*)*MAX_PROCESSES,GFP_KERNEL);
     if(!curr_device->pid_array){
             printk("device cannot be opened! kmalloc was failed\n");
             kfree(curr_device->data);
@@ -201,12 +204,14 @@ int my_open(struct inode *inode, struct file *filp)
         tail_device = curr_device;
     }
     buffers_counter++;
+	printk("open succeed\n");
     return 0;
 }
 
 
 int my_release(struct inode *inode, struct file *filp) {
     // handle file closing
+	printk("my_release is called!\n");
     Process *curr_process = filp->private_data;
 
     curr_process->device->pid_array[curr_process->pid] = NULL;
@@ -242,7 +247,7 @@ int my_release(struct inode *inode, struct file *filp) {
     return 0;
 }
 
-ssize_t my_write(struct file *filp, char *buf, size_t count, loff_t *f_pos){
+ssize_t my_write(struct file *filp, const char *buf, size_t count, loff_t *f_pos){
 
     printk("my_write is called!\n");
 
@@ -256,7 +261,7 @@ ssize_t my_write(struct file *filp, char *buf, size_t count, loff_t *f_pos){
         return -EINVAL;
     }
 
-    Process *curr_process = filp->private_data;
+    Process *curr_process = (Process*)filp->private_data;
     myDevice *curr_device = curr_process->device;
     int written_bytes = 0;
 
@@ -269,8 +274,9 @@ ssize_t my_write(struct file *filp, char *buf, size_t count, loff_t *f_pos){
         printk("There is not enough space! Check your input!\n");
         return -EAGAIN;
     }
-
-    for (int i = 0; i < count; ++i) {
+	
+	int i = 0;
+    for (; i < count; ++i) {
         //not sure if the check is necessary
         if(&buf[i] == NULL){
             printk("Buffer reading error! Check your input!\n");
@@ -281,7 +287,7 @@ ssize_t my_write(struct file *filp, char *buf, size_t count, loff_t *f_pos){
         written_bytes++;
     }
 
-    return written_bytes;
+    return (ssize_t)written_bytes;
 }
 
 ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
@@ -297,7 +303,7 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 
     //there are more valid input checks?
 
-    Process *curr_process = filp->private_data;
+    Process *curr_process = (Process*)filp->private_data;
     myDevice *curr_device = curr_process->device;
 
     // Wrong type
@@ -308,14 +314,15 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 
     // No data to read
     if(curr_process->read_p == curr_device->write_p){
-        printk("No data to read!");
+        printk("No data to read!\n");
         return -EAGAIN;
     }
 
     int read_bytes = 0;
-
-    for (int i = 0; i < count && curr_process->read_p < curr_device->write_p; ++i) {
-        buf[i] = curr_device[curr_process->read_p];
+	
+	int i = 0;
+    for (; i < count && curr_process->read_p < curr_device->write_p; ++i) {
+        buf[i] = (curr_device->data)[curr_process->read_p];
         curr_process->read_p++;
         read_bytes++;
     }
@@ -331,16 +338,18 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         init_all_read_p(curr_device->pid_array);
         curr_device->reach_EOF_count = 0;
     }
-
+    
     // Return number of bytes read.
-    return read_bytes;
+    return (ssize_t)read_bytes;
 }
+
 
 
 
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    Process *curr_process = filp->private_data;
+	printk("my_ioctl is called!\n");
+	Process* curr_process = (Process*)(filp->private_data);
 
     switch(cmd)
     {
@@ -351,12 +360,17 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
         }
 
         else{
-            curr_process->permission = arg;
+			printk("Type is set!\n");
+			curr_process->permission = arg;
         }
 
 	break;
     case GET_TYPE:
-        return curr_process->permission;
+		if(curr_process->permission == TYPE_NONE) printk("The type is TYPE_NONE!\n");
+		if(curr_process->permission == TYPE_PUB) printk("The type is TYPE_PUB!\n");
+		if(curr_process->permission == TYPE_SUB) printk("The type is TYPE_SUB!\n");
+
+		return curr_process->permission;
 	break;
     default:
 	return -ENOTTY;
