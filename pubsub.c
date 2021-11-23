@@ -228,14 +228,16 @@ int my_release(struct inode *inode, struct file *filp) {
         // last buffer is closed
         if(buffers_counter == 0){
             kfree(curr_process->device);
-            cleanup_module();
+        //    cleanup_module();
         }
         // remove buffer from global buffer list
         else {
             if (curr_process->device == head_device) {
                 head_device = head_device->next;
+				head_device->prev = NULL;
             } else if (curr_process->device == tail_device) {
                 tail_device = tail_device->prev;
+				tail_device->next = NULL;
             } else {
                 curr_process->device->prev->next = curr_process->device->next;
             }
@@ -317,6 +319,11 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         printk("No data to read!\n");
         return -EAGAIN;
     }
+	
+	if(curr_process->read_p + count > curr_device->write_p){
+        printk("There is not enough data to read! Check your input!\n");
+        return -EAGAIN;
+	}
 
     int read_bytes = 0;
 	
