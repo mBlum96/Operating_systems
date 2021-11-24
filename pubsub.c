@@ -35,8 +35,8 @@ typedef struct myDevice{
     int users_count;
     struct Process** pid_array;
     int reach_EOF_count;
-    struct myDevice *next;
-    struct myDevice *prev;
+  //  struct myDevice *next;
+   // struct myDevice *prev;
 }myDevice;
 
 typedef struct Process{
@@ -46,8 +46,9 @@ typedef struct Process{
     int permission;
 }Process;
 
-myDevice *head_device;
-myDevice *tail_device;
+//myDevice *head_device;
+//myDevice *tail_device;
+myDevice* buffers[MAX_PROCESSES];
 
 struct file_operations my_fops = {
     .open = my_open,
@@ -58,24 +59,24 @@ struct file_operations my_fops = {
 };
 
 int find_available_id(Process** pid_array){
-	int i=0;
-    for (; i < MAX_PROCESSES; ++i) {
-        if(pid_array[i] != NULL) return i;
+	int i;
+    for (i = 0; i < MAX_PROCESSES; ++i) {
+        if(pid_array[i] == NULL) return i;
     }
     //not supposed to reach here
     return 0;
 }
 
 void init_array(Process** pid_array){
-	int i=0;
-    for (; i < MAX_PROCESSES; ++i) {
+	int i;
+    for (i = 0; i < MAX_PROCESSES; ++i) {
         pid_array[i] = NULL;
     }
 }
 
 void init_all_read_p(Process **pid_array){
-	int i=0;
-    for (; i < MAX_PROCESSES; ++i) {
+	int i;
+    for (i = 0; i < MAX_PROCESSES; ++i) {
         if(pid_array[i] != NULL){
             pid_array[i]->read_p = 0;
         }
@@ -92,9 +93,14 @@ int init_module(void)
 	printk(KERN_WARNING "can't get dynamic major\n");
 	return my_major;
     }
+	
+	int i;
+	for (i = 0; i < MAX_PROCESSES; ++i) {
+        buffers[i] = NULL;
+    }
 
-    head_device = NULL;
-    tail_device = NULL;
+ //   head_device = NULL;
+ //   tail_device = NULL;
 
     return 0;
 }
@@ -130,26 +136,31 @@ int my_open(struct inode *inode, struct file *filp)
     ///////////////// Matching Process With Buffer ///////////////
 
     int curr_minor = MINOR(inode->i_rdev);
-    myDevice *curr_device = head_device;
+    myDevice *curr_device;
 
     //checking if the buffer is already exist
-    while(curr_device){
-        if(curr_device->minor == curr_minor){
+   // while(curr_device){
+        if(buffers[curr_minor] != NULL){
             printk("Device is found! Device's minor : %d\n", curr_minor);
+			
+			curr_device = buffers[curr_minor];
 
             new_process->device = curr_device;
+			    printk("1!\n");
             new_process->pid = find_available_id(curr_device->pid_array);
+						    printk("2!\n");
             new_process->read_p = 0;
             new_process->permission = TYPE_NONE;
             filp->private_data = new_process;
 
             curr_device->users_count++;
             curr_device->pid_array[new_process->pid] = new_process;
+						    printk("3!\n");
 
             return 0;
         }
-        curr_device = curr_device->next;
-    }
+        //curr_device = curr_device->next;
+  //  }
 
     //if reached here the buffer is not exist
     printk("Device was not found! Setting new device... Device's minor : %d\n", curr_minor);
@@ -171,7 +182,7 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device->write_p = 0;
     curr_device->users_count = 1;
 
-    curr_device->pid_array = kmalloc(sizeof(Process*)*MAX_PROCESSES,GFP_KERNEL);
+    curr_device->pid_array = kmalloc(sizeof(Process*)*(MAX_PROCESSES*2),GFP_KERNEL);
     if(!curr_device->pid_array){
             printk("device cannot be opened! kmalloc was failed\n");
             kfree(curr_device->data);
@@ -182,8 +193,10 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device->pid_array[0] = new_process;
 
     curr_device->reach_EOF_count = 0;
-    curr_device->next = NULL;
-    curr_device->prev = NULL;
+    //curr_device->next = NULL;
+    //curr_device->prev = NULL;
+	
+	buffers[curr_minor] = curr_device;
 
     new_process->device = curr_device;
     new_process->read_p = 0;
@@ -191,18 +204,18 @@ int my_open(struct inode *inode, struct file *filp)
 
     filp->private_data = new_process;
 
-    if(head_device == NULL){
-        head_device = curr_device;
-    }
-    else if(tail_device == NULL){
-        head_device->next = curr_device;
-        curr_device->prev = head_device;
-        tail_device = curr_device;
-    }
-    else{
-        tail_device->next = curr_device;
-        tail_device = curr_device;
-    }
+    //if(head_device == NULL){
+    //    head_device = curr_device;
+    //}
+    //else if(tail_device == NULL){
+    //    head_device->next = curr_device;
+     //   curr_device->prev = head_device;
+      //  tail_device = curr_device;
+    //}
+    //else{
+     //   tail_device->next = curr_device;
+       // tail_device = curr_device;
+    //}
     buffers_counter++;
 	printk("open succeed\n");
     return 0;
@@ -212,7 +225,9 @@ int my_open(struct inode *inode, struct file *filp)
 int my_release(struct inode *inode, struct file *filp) {
     // handle file closing
 	printk("my_release is called!\n");
-    Process *curr_process = filp->private_data;
+    Process *curr_process = (Process*)filp->private_data;
+	
+	printk("%d\n",curr_process->pid);
 
     curr_process->device->pid_array[curr_process->pid] = NULL;
     curr_process->device->users_count--;
@@ -223,27 +238,33 @@ int my_release(struct inode *inode, struct file *filp) {
     if (curr_process->device->users_count == 0) {
         kfree(curr_process->device->data);
         kfree(curr_process->device->pid_array);
+		
+		buffers[curr_process->device->minor] = NULL;
+		
+		kfree(curr_process->device);
+	
+
 
         buffers_counter--;
         // last buffer is closed
-        if(buffers_counter == 0){
-            kfree(curr_process->device);
-        //    cleanup_module();
-        }
+    //    if(buffers_counter == 0){
+     //       kfree(curr_process->device);
+     //   }
         // remove buffer from global buffer list
-        else {
-            if (curr_process->device == head_device) {
-                head_device = head_device->next;
-				head_device->prev = NULL;
-            } else if (curr_process->device == tail_device) {
-                tail_device = tail_device->prev;
-				tail_device->next = NULL;
-            } else {
-                curr_process->device->prev->next = curr_process->device->next;
-            }
-            kfree(curr_process->device);
-        }
+     //   else {
+     //       if (curr_process->device == head_device) {
+      //          head_device = head_device->next;
+	//			head_device->prev = NULL;
+     //       } else if (curr_process->device == tail_device) {
+    // /           tail_device = tail_device->prev;
+	//			tail_device->next = NULL;
+    //        } else {
+    //            curr_process->device->prev->next = curr_process->device->next;
+   //         }
+            
+   //     }
     }
+	
     kfree(curr_process);
 
     return 0;
@@ -368,6 +389,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
         else{
 			printk("Type is set!\n");
+			if (arg != TYPE_PUB || arg != TYPE_SUB) return -EINVAL;
 			curr_process->permission = arg;
         }
 
@@ -385,3 +407,4 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
     return 0;
 }
+
