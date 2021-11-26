@@ -33,8 +33,10 @@ typedef struct myDevice{
     int minor;
     int write_p;
     int users_count;
+	int readers;
     struct Process** pid_array;
     int reach_EOF_count;
+	int reach_EOF_readers;
   //  struct myDevice *next;
    // struct myDevice *prev;
 }myDevice;
@@ -181,6 +183,7 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device->minor = curr_minor;
     curr_device->write_p = 0;
     curr_device->users_count = 1;
+	curr_device->readers = 0;
 
     curr_device->pid_array = kmalloc(sizeof(Process*)*(MAX_PROCESSES*2),GFP_KERNEL);
     if(!curr_device->pid_array){
@@ -193,6 +196,7 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device->pid_array[0] = new_process;
 
     curr_device->reach_EOF_count = 0;
+	curr_device->reach_EOF_readers = 0;
     //curr_device->next = NULL;
     //curr_device->prev = NULL;
 	
@@ -368,15 +372,19 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 
     if(curr_process->read_p == MAX_CHARACTERS){
         curr_device->reach_EOF_count++;
+		curr_device->reach_EOF_readers++;
 					printk("\n\n\n\nEOF\n\n\n");
+					printk("EOF readers %d\n", curr_device->reach_EOF_readers);
+					printk("reades %d\n", curr_device->readers);
     }
 
 
     // If all processes reached EOF, we will reset the buffer
-    if(curr_device->reach_EOF_count == curr_device->users_count){
+    if(curr_device->reach_EOF_readers == curr_device->readers){
         curr_device->write_p = 0;
         init_all_read_p(curr_device->pid_array);
         curr_device->reach_EOF_count = 0;
+		curr_device->reach_EOF_readers = 0;
 		printk("******buffer init************");
     }
     
@@ -403,6 +411,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
         else{
 			printk("Type is set!\n");
 			if(arg == TYPE_PUB || arg == TYPE_SUB){
+				if(arg == TYPE_SUB) curr_process->device->readers++;
 				curr_process->permission = arg;
 				break;
 			}
@@ -423,6 +432,4 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
     return 0;
 }
-
-
 
