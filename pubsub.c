@@ -236,12 +236,16 @@ int my_release(struct inode *inode, struct file *filp) {
 
     // last process is closed, we need to remove this buffer
     if (curr_process->device->users_count == 0) {
+			printk("11111\n");
         kfree(curr_process->device->data);
         kfree(curr_process->device->pid_array);
 		
 		buffers[curr_process->device->minor] = NULL;
 		
 		kfree(curr_process->device);
+		
+					printk("2222222\n");
+
 	
 
 
@@ -273,6 +277,7 @@ int my_release(struct inode *inode, struct file *filp) {
 ssize_t my_write(struct file *filp, const char *buf, size_t count, loff_t *f_pos){
 
     printk("my_write is called!\n");
+	
 
     if(buf == NULL){
         printk("Invalid input! Check your input!\n");
@@ -297,6 +302,11 @@ ssize_t my_write(struct file *filp, const char *buf, size_t count, loff_t *f_pos
         printk("There is not enough space! Check your input!\n");
         return -EAGAIN;
     }
+	
+//	if(curr_process->device->users_count == curr_process->device->reach_EOF_count){
+	//	printk("Can't write");
+		//return -EFAULT;
+	// }
 	
 	int i = 0;
     for (; i < count; ++i) {
@@ -341,22 +351,24 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         return -EAGAIN;
     }
 	
-	if(curr_process->read_p + count > curr_device->write_p){
-        printk("There is not enough data to read! Check your input!\n");
-        return -EAGAIN;
-	}
+	//if(curr_process->read_p + count > curr_device->write_p){
+      //  printk("There is not enough data to read! Check your input!\n");
+        //return -EAGAIN;
+	//}
 
     int read_bytes = 0;
 	
-	int i = 0;
-    for (; i < count && curr_process->read_p < curr_device->write_p; ++i) {
+	int i;
+    for (i = 0; i < count && curr_process->read_p < curr_device->write_p; ++i) {
         buf[i] = (curr_device->data)[curr_process->read_p];
         curr_process->read_p++;
         read_bytes++;
     }
+	printk("%d\n", (int)read_bytes);
 
     if(curr_process->read_p == MAX_CHARACTERS){
         curr_device->reach_EOF_count++;
+					printk("\n\n\n\nEOF\n\n\n");
     }
 
 
@@ -365,6 +377,7 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         curr_device->write_p = 0;
         init_all_read_p(curr_device->pid_array);
         curr_device->reach_EOF_count = 0;
+		printk("******buffer init************");
     }
     
     // Return number of bytes read.
@@ -377,7 +390,7 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	printk("my_ioctl is called!\n");
-	Process* curr_process = (Process*)(filp->private_data);
+	Process* curr_process = (filp->private_data);
 
     switch(cmd)
     {
@@ -389,8 +402,11 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
         else{
 			printk("Type is set!\n");
-			if (arg != TYPE_PUB || arg != TYPE_SUB) return -EINVAL;
-			curr_process->permission = arg;
+			if(arg == TYPE_PUB || arg == TYPE_SUB){
+				curr_process->permission = arg;
+				break;
+			}
+			else return -EINVAL;
         }
 
 	break;
@@ -407,4 +423,6 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
     return 0;
 }
+
+
 
