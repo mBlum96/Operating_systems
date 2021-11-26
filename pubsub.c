@@ -37,8 +37,6 @@ typedef struct myDevice{
     struct Process** pid_array;
     int reach_EOF_count;
 	int reach_EOF_readers;
-  //  struct myDevice *next;
-   // struct myDevice *prev;
 }myDevice;
 
 typedef struct Process{
@@ -48,8 +46,6 @@ typedef struct Process{
     int permission;
 }Process;
 
-//myDevice *head_device;
-//myDevice *tail_device;
 myDevice* buffers[MAX_PROCESSES];
 
 struct file_operations my_fops = {
@@ -101,9 +97,6 @@ int init_module(void)
         buffers[i] = NULL;
     }
 
- //   head_device = NULL;
- //   tail_device = NULL;
-
     return 0;
 }
 
@@ -131,7 +124,7 @@ int my_open(struct inode *inode, struct file *filp)
     Process *new_process = kmalloc(sizeof(Process),GFP_KERNEL);
     //checking ig allocating succeed
     if(!new_process){
-        printk("device cannot be opened! kmalloc was failed\n");
+        printk("device cannot be opened! kmalloc has failed\n");
         return -ENOMEM;
     }
 
@@ -170,13 +163,13 @@ int my_open(struct inode *inode, struct file *filp)
     curr_device = kmalloc(sizeof(myDevice),GFP_KERNEL);
     //checking if allocating succeed
     if(!curr_device){
-        printk("device cannot be opened! kmalloc was failed\n");
+        printk("device cannot be opened! kmalloc has failed\n");
         return -ENOMEM;
     }
     curr_device->data = kmalloc(sizeof(char)*(MAX_CHARACTERS),GFP_KERNEL);
     //checking if allocating succeed
     if(!curr_device->data){
-        printk("device cannot be opened! kmalloc was failed\n");
+        printk("device cannot be opened! kmalloc has failed\n");
         kfree(curr_device);
         return -ENOMEM;
     }
@@ -187,7 +180,7 @@ int my_open(struct inode *inode, struct file *filp)
 
     curr_device->pid_array = kmalloc(sizeof(Process*)*(MAX_PROCESSES*2),GFP_KERNEL);
     if(!curr_device->pid_array){
-            printk("device cannot be opened! kmalloc was failed\n");
+            printk("device cannot be opened! kmalloc has failed\n");
             kfree(curr_device->data);
             kfree(curr_device);
             return -ENOMEM;
@@ -197,8 +190,6 @@ int my_open(struct inode *inode, struct file *filp)
 
     curr_device->reach_EOF_count = 0;
 	curr_device->reach_EOF_readers = 0;
-    //curr_device->next = NULL;
-    //curr_device->prev = NULL;
 	
 	buffers[curr_minor] = curr_device;
 
@@ -208,18 +199,6 @@ int my_open(struct inode *inode, struct file *filp)
 
     filp->private_data = new_process;
 
-    //if(head_device == NULL){
-    //    head_device = curr_device;
-    //}
-    //else if(tail_device == NULL){
-    //    head_device->next = curr_device;
-     //   curr_device->prev = head_device;
-      //  tail_device = curr_device;
-    //}
-    //else{
-     //   tail_device->next = curr_device;
-       // tail_device = curr_device;
-    //}
     buffers_counter++;
 	printk("open succeed\n");
     return 0;
@@ -230,8 +209,9 @@ int my_release(struct inode *inode, struct file *filp) {
     // handle file closing
 	printk("my_release is called!\n");
     Process *curr_process = (Process*)filp->private_data;
+	curr_process->pid = find_available_id(curr_process->device->pid_array);
 	
-	printk("%d\n",curr_process->pid);
+	printk("process id is: %d\n",curr_process->pid);
 
     curr_process->device->pid_array[curr_process->pid] = NULL;
     curr_process->device->users_count--;
@@ -254,23 +234,6 @@ int my_release(struct inode *inode, struct file *filp) {
 
 
         buffers_counter--;
-        // last buffer is closed
-    //    if(buffers_counter == 0){
-     //       kfree(curr_process->device);
-     //   }
-        // remove buffer from global buffer list
-     //   else {
-     //       if (curr_process->device == head_device) {
-      //          head_device = head_device->next;
-	//			head_device->prev = NULL;
-     //       } else if (curr_process->device == tail_device) {
-    // /           tail_device = tail_device->prev;
-	//			tail_device->next = NULL;
-    //        } else {
-    //            curr_process->device->prev->next = curr_process->device->next;
-   //         }
-            
-   //     }
     }
 	
     kfree(curr_process);
@@ -307,10 +270,6 @@ ssize_t my_write(struct file *filp, const char *buf, size_t count, loff_t *f_pos
         return -EAGAIN;
     }
 	
-//	if(curr_process->device->users_count == curr_process->device->reach_EOF_count){
-	//	printk("Can't write");
-		//return -EFAULT;
-	// }
 	
 	int i = 0;
     for (; i < count; ++i) {
@@ -378,7 +337,6 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 					printk("reades %d\n", curr_device->readers);
     }
 
-
     // If all processes reached EOF, we will reset the buffer
     if(curr_device->reach_EOF_readers == curr_device->readers){
         curr_device->write_p = 0;
@@ -392,9 +350,6 @@ ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     return (ssize_t)read_bytes;
 }
 
-
-
-
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	printk("my_ioctl is called!\n");
@@ -402,32 +357,36 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
     switch(cmd)
     {
-    case SET_TYPE:
-        if(curr_process->permission != TYPE_NONE){
-            printk("Error! Type is already set!\n");
-            return -EPERM;
-        }
-
-        else{
-			printk("Type is set!\n");
-			if(arg == TYPE_PUB || arg == TYPE_SUB){
-				if(arg == TYPE_SUB) curr_process->device->readers++;
-				curr_process->permission = arg;
-				break;
+		case SET_TYPE:
+			if(curr_process->permission != TYPE_NONE){
+				printk("Error! Type is already set!\n");
+				return -EPERM;
 			}
-			else return -EINVAL;
-        }
 
-	break;
-    case GET_TYPE:
-		if(curr_process->permission == TYPE_NONE) printk("The type is TYPE_NONE!\n");
-		if(curr_process->permission == TYPE_PUB) printk("The type is TYPE_PUB!\n");
-		if(curr_process->permission == TYPE_SUB) printk("The type is TYPE_SUB!\n");
+			else{
+				printk("Trying to set type!\n");
+				if(arg == TYPE_PUB || arg == TYPE_SUB){
+					if(arg == TYPE_SUB) curr_process->device->readers++;
+					curr_process->permission = arg;
+					printk("Type set succesfully\n");
+					break;
+				}
+				else{
+					printk("Type set was unsuccesfull\n");
+					return -EINVAL;
+				}
+			}
+			break;
+		case GET_TYPE:
+			if(curr_process->permission == TYPE_NONE) printk("The type is TYPE_NONE!\n");
+			if(curr_process->permission == TYPE_PUB) printk("The type is TYPE_PUB!\n");
+			if(curr_process->permission == TYPE_SUB) printk("The type is TYPE_SUB!\n");
 
-		return curr_process->permission;
-	break;
-    default:
-	return -ENOTTY;
+			return curr_process->permission;
+			break;
+		default:
+			return -ENOTTY;
+			break;
     }
 
     return 0;
